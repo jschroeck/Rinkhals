@@ -626,6 +626,9 @@ class MmuAceController:
             self.printer = RemotePrinterController(self.server, host)
 
         self._last_gate_fingerprint: str = ""
+        # Last temperature message logged per (unit_id, gate_index), used to
+        # log gate temperatures only when they change (issue #130).
+        self._last_gate_temp_log: Dict[tuple, Optional[str]] = {}
 
         # Optional callback invoked at the end of _disable_ace(). Wired
         # by MmuAcePatcher to also clear its subscription diff cache,
@@ -1084,7 +1087,7 @@ class MmuAceController:
                 logging.debug(f"Using cached temperature for unit {unit_id} gate {gate_index} (age: {age:.1f}s)")
                 return cached_data
             else:
-                logging.info(f"Cache expired for unit {unit_id} gate {gate_index} (age: {age:.1f}s), refreshing...")
+                logging.debug(f"Cache expired for unit {unit_id} gate {gate_index} (age: {age:.1f}s), refreshing...")
 
         # Query ACE hardware for filament info
         try:
@@ -1106,7 +1109,7 @@ class MmuAceController:
                         self._filament_temp_cache.pop(oldest_key)
                         logging.debug(f"Evicted oldest cache entry: {oldest_key}")
 
-                    logging.info(f"Cached temperature for unit {unit_id} gate {gate_index} (SKU: {sku}): {temp_data}")
+                    logging.debug(f"Cached temperature for unit {unit_id} gate {gate_index} (SKU: {sku}): {temp_data}")
                     return temp_data
 
             logging.warning(f"No temperature data in filament_info for unit {unit_id} gate {gate_index}")
@@ -1211,19 +1214,28 @@ class MmuAceController:
                 gate.status = GATE_AVAILABLE if status == "ready" else GATE_EMPTY if status == "empty" or status == "runout" else GATE_UNKNOWN
 
                 # Set temperature from RFID tag if available, otherwise use material default
+                temp_msg = None
                 if temp_data and isinstance(temp_data, dict) and "min" in temp_data:
                     # Store both min and max from RFID tag
                     gate.temperature_min = temp_data.get("min", -1)
                     gate.temperature_max = temp_data.get("max", -1)
                     # Use min temperature as default (more conservative)
                     gate.temperature = gate.temperature_min
-                    logging.info(f"Gate {index}: Using RFID temperatures min={gate.temperature_min}°C, max={gate.temperature_max}°C")
+                    temp_msg = f"Gate {index}: Using RFID temperatures min={gate.temperature_min}°C, max={gate.temperature_max}°C"
                 elif type:
                     # Fallback to material-based default (no min/max range for defaults)
                     gate.temperature = get_material_temperature(type)
                     gate.temperature_min = -1
                     gate.temperature_max = -1
-                    logging.info(f"Gate {index}: Using material default temperature {gate.temperature}°C for {type}")
+                    temp_msg = f"Gate {index}: Using material default temperature {gate.temperature}°C for {type}"
+
+                # This method runs on every ACE status update, so only log the
+                # resolved temperature when it actually changes for this gate;
+                # repeating it every poll was ~64% of the Moonraker log (issue #130).
+                if self._last_gate_temp_log.get((hub_id, index)) != temp_msg:
+                    self._last_gate_temp_log[(hub_id, index)] = temp_msg
+                    if temp_msg:
+                        logging.info(temp_msg)
 
                 # Parse SKU for additional information
                 gate.sku = sku

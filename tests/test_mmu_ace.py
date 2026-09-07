@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -165,6 +166,31 @@ class MmuAceControllerSyncTests(unittest.TestCase):
         status = self.controller.get_status()
         self.assertEqual(status.mmu.filament_pos, self.module.FILAMENT_POS_UNLOADED)
         self.assertTrue(status.mmu.active_filament.empty)
+
+    def _gate_temperature_logs(self, hub):
+        with mock.patch.object(self.module.logging, "info") as info:
+            self.controller._set_ace_status(hub)
+        return [call.args[0] for call in info.call_args_list if call.args[0].startswith("Gate ")]
+
+    def test_gate_temperatures_are_logged_only_when_they_change(self):
+        hub = self._build_filament_hub("")
+        hub["filament_hubs"][0]["slots"][1]["temperature"] = {"min": 190, "max": 230}
+
+        self.assertEqual(self._gate_temperature_logs(hub), ["Gate 1: Using RFID temperatures min=190°C, max=230°C"])
+        # Same status again (periodic poll): nothing new to log
+        self.assertEqual(self._gate_temperature_logs(hub), [])
+
+        # Spool swapped: only the changed gate is logged
+        hub["filament_hubs"][0]["slots"][1]["temperature"] = {"min": 220, "max": 260}
+        self.assertEqual(self._gate_temperature_logs(hub), ["Gate 1: Using RFID temperatures min=220°C, max=260°C"])
+        self.assertEqual(self._gate_temperature_logs(hub), [])
+
+        # Tag data gone: falls back to the material default, logged once
+        del hub["filament_hubs"][0]["slots"][1]["temperature"]
+        logs = self._gate_temperature_logs(hub)
+        self.assertEqual(len(logs), 1)
+        self.assertTrue(logs[0].startswith("Gate 1: Using material default temperature"))
+        self.assertEqual(self._gate_temperature_logs(hub), [])
 
     def test_disable_ace_invokes_registered_reset_callback(self):
         calls = []
