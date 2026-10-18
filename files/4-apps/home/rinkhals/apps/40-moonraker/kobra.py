@@ -741,11 +741,22 @@ class Kobra:
                         state = 'paused'
                     if state.lower() in ['complete', 'completed', 'print_complete', 'finished', 'finish', 'done']:
                         state = 'complete'
-
+                        
+                    # Re-arm the file-consumed flag whenever the printer reports an active print for standby handling below
+                    if state.lower() == 'printing':
+                        setattr(self, '_gcode_file_fully_consumed', False)
+                        
                     # Debounce GoKlipper's standby state due to race condition at end of print (#445)
-                    # GoKlipper emits "standby" then "complete" 1-2 seconds later, causing Moonraker to report "cancelled"
+                    # GoKlipper emits "standby" the moment the gcode file is fully consumed and before end-of-print sequence has finished.
+                    # Report completion immediately instead of debouncing into a "standby" that Moonraker history records as "cancelled". (#184)
                     if state.lower() == 'standby' and getattr(self, '_last_tracked_state', None) == 'printing':
-                        state = 'printing' # Keep it printing for now
+                        sdcard_status = status.get('virtual_sdcard') if isinstance(status, dict) else None
+                        if isinstance(sdcard_status, dict) and 'progress' in sdcard_status:
+                            setattr(self, '_gcode_file_fully_consumed', bool(sdcard_status.get('progress', 0) >= 1.0))
+                        if getattr(self, '_gcode_file_fully_consumed', False):
+                            state = 'complete'
+                        else:
+                            state = 'printing' # Keep it printing for now
                         
                         async def _apply_delayed_standby():
                             import asyncio
