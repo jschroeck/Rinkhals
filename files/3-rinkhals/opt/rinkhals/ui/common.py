@@ -352,13 +352,25 @@ class FirmwareVersion:
     url: str
 
 class Firmware:
+    # Per-model firmware manifests. These were pointed at rinkhals.thedju.net,
+    # which no longer resolves at all, so the installer's "Manage system
+    # versions" screen listed nothing on every model (issue #178). The archive
+    # moved to rinkhals.firmwareforge.org; the docs were updated at the time but
+    # this dict was missed.
+    #
+    # We read the generated manifests from the Rinkhals.Firmwares repo rather
+    # than the website directly: the download URLs inside them already point at
+    # firmwareforge and Anycubic's CDN, and raw.githubusercontent.com is the
+    # same host the installer already uses for Rinkhals releases, so no new
+    # trust or TLS surface. manifests-anycubic is the current set;
+    # manifests-mirror is stale and still carries thedju.net download URLs.
     repositories = {
-        'K2P': 'https://rinkhals.thedju.net/Kobra%202%20Pro/manifest.json',
-        'K3': 'https://rinkhals.thedju.net/Kobra%203/manifest.json',
-        'K3V2': 'https://rinkhals.thedju.net/Kobra%203%20V2/manifest.json',
-        'KS1': 'https://rinkhals.thedju.net/Kobra%20S1/manifest.json',
-        'K3M': 'https://rinkhals.thedju.net/Kobra%203%20Max/manifest.json',
-        'KS1M': 'https://rinkhals.thedju.net/Kobra%20S1%20Max/manifest.json',
+        'K2P': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-k2p.json',
+        'K3': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-k3.json',
+        'K3V2': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-k3v2.json',
+        'KS1': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-ks1.json',
+        'K3M': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-k3m.json',
+        'KS1M': 'https://raw.githubusercontent.com/rinkhals-community/Rinkhals.Firmwares/refs/heads/main/manifests-anycubic/manifest-ks1m.json',
     }
 
     def get_current_version():
