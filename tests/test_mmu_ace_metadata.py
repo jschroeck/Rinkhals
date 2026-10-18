@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -120,3 +121,31 @@ class StripIdempotencyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MetadataParserTimeoutTests(unittest.TestCase):
+    """Moonraker kills the metadata script at default_metadata_parser_timeout
+    (20s upstream). Our script also strips lines gklib cannot parse, so being
+    killed means the strip never lands and gklib crashes at print start
+    (issue #126, seen on a 35.7 MB file). Losing this setting silently
+    reintroduces that, so assert it stays put."""
+
+    CONF = (
+        Path(__file__).resolve().parents[1]
+        / "files/4-apps/home/rinkhals/apps/40-moonraker/moonraker.conf"
+    )
+
+    def test_timeout_is_raised_above_the_upstream_default(self):
+        text = self.CONF.read_text()
+        match = re.search(
+            r"^\s*default_metadata_parser_timeout\s*:\s*([0-9.]+)", text, re.MULTILINE
+        )
+        self.assertIsNotNone(
+            match, "default_metadata_parser_timeout missing from moonraker.conf"
+        )
+        self.assertGreaterEqual(float(match.group(1)), 300.0)
+
+    def test_setting_is_inside_the_file_manager_section(self):
+        text = self.CONF.read_text()
+        section = text.split("[file_manager]", 1)[1].split("\n[", 1)[0]
+        self.assertIn("default_metadata_parser_timeout", section)
