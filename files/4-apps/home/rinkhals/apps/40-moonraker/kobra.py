@@ -105,6 +105,7 @@ class Kobra:
     _remote_mode = None
     _total_layer = 0
     _states_cache = []
+    _last_sdcard_progress = 0.0
     _exclude_object_current_file = None
     _exclude_object_objects = None
     _exclude_object_force_end_task = None
@@ -724,6 +725,12 @@ class Kobra:
 
     def patch_status(self, status, is_subscription_update=False):
         if self.is_goklipper_running():
+            # Remember last reported file progress (#184)
+            sdcard_status = status.get('virtual_sdcard')
+            if isinstance(sdcard_status, dict):
+                progress = sdcard_status.get('progress')
+                if isinstance(progress, (int, float)):
+                    self._last_sdcard_progress = progress
 
             if 'print_stats' in status:
                 if 'state' in status['print_stats']: 
@@ -741,19 +748,19 @@ class Kobra:
                         state = 'paused'
                     if state.lower() in ['complete', 'completed', 'print_complete', 'finished', 'finish', 'done']:
                         state = 'complete'
-                        
-                    # Re-arm the file-consumed flag whenever the printer reports an active print for standby handling below
-                    if state.lower() == 'printing':
-                        setattr(self, '_gcode_file_fully_consumed', False)
-                        
+
+                    # Recognize as new print when the printer moves to printing from anything other than "printing" or "paused"
+                    # and forget progress of the previous print
+                    previous_print_state = getattr(self, '_last_tracked_state', None)
+                    if state.lower() == 'printing' and previous_print_state not in ('printing', 'paused'):
+                        self._last_sdcard_progress = 0.0
+
                     # Debounce GoKlipper's standby state due to race condition at end of print (#445)
                     # GoKlipper emits "standby" the moment the gcode file is fully consumed and before end-of-print sequence has finished.
                     # Report completion immediately instead of debouncing into a "standby" that Moonraker history records as "cancelled". (#184)
+                    # Use the last progress seen in any push, so this works for whatever way the printer model batches updates
                     if state.lower() == 'standby' and getattr(self, '_last_tracked_state', None) == 'printing':
-                        sdcard_status = status.get('virtual_sdcard') if isinstance(status, dict) else None
-                        if isinstance(sdcard_status, dict) and 'progress' in sdcard_status:
-                            setattr(self, '_gcode_file_fully_consumed', bool(sdcard_status.get('progress', 0) >= 1.0))
-                        if getattr(self, '_gcode_file_fully_consumed', False):
+                        if self._last_sdcard_progress >= 1.0:
                             state = 'complete'
                         else:
                             state = 'printing' # Keep it printing for now
